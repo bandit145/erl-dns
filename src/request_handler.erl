@@ -19,9 +19,11 @@ terminate(_, _) ->
 	gen_server:cast(DNSPid, {remove_handler, self()}),
 	ok.
 
-handle_event({dns_request, Packet}, State) ->
+handle_event({dns_request, Address, Port, Packet}, State) ->
 	{ok, ParsedPacket} = dns:parse_packet(Packet),
-	io:format("Packet info ~w~n", [ParsedPacket]),
+	io:format("Packet info: ~w~n", [ParsedPacket]),
 	{ok, State}.
 
 % private API stuff
+
+

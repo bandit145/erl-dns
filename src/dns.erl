@@ -1,5 +1,5 @@
 -module(dns).
--export([parse_packet/1, encode_packet/1, encode_question/1]).
+-export([parse_packet/1, encode_packet/1, encode_question/1, encode_string/1, query/2]).
 
 
 %define DNS packet related constants
@@ -17,6 +17,27 @@
 
 -include("dns.hrl").
 
+%high level functons
+query(Name, {Type, Server, Port, udp}) ->
+	EName = encode_string(Name),
+	DNSPacket = #dns_packet{header=#dns_header{id=rand:bytes(16), qr=0, opcode=?QUERY, tc=0, rd=1, ra=0, z=0, rcode=?NOERR, qdcount=1, ancount=0, nscount=0, arcount=0}, question=#dns_record{name=EName, type=Type, class=1}},
+	{ok, Packet} = encode_packet(DNSPacket),
+	{ok, Sock} = gen_udp:open(rand:uniform_s(1024, 65535)),
+	ok = gen_udp:connect(Sock, Server, Port),
+	ok = gen_udp:send(Sock, Packet),
+	{ok, {_, _, RPacket}} = gen_udp:recv(Sock),
+	parse_packet(RPacket).
+
+
+encode_string(Str) ->
+	F = fun(S, Accum) ->
+			Len = length(S),
+			LData = [Len] ++ [<<X>> || X <- S],
+			LData ++ Accum
+		end,
+	QList = string:split(Str, "."),
+	lists:foldr(F, [], QList).
+
 %returns IO list for feeding into gen_tcp/gen_udp:send
 encode_packet(#dns_packet{header=Header, question=Question, answer=Answer, authority=Authority, additional=Additional}) ->
 	ID = Header#dns_header.id,
@@ -27,13 +48,21 @@ encode_packet(#dns_packet{header=Header, question=Question, answer=Answer, autho
 	NSCOUNT = Header#dns_header.nscount,
 	ARCOUNT = Header#dns_header.arcount,
 	%encode question
-	QIOList = encode_question(Question),
+	% we are at 96 bits here (for label pointer)
+	QIOList = encode_question([Question]),
 	%encode answer
-	AIOList = encode_answer(Answer),
+	AIOList = if 
+		Answer =/= undefined -> encode_answer(Answer);
+		true -> [0]
+		end,
 	%encode Additonal data
-	AddIOList = encode_additonal(Additional),
+	AddIOList = if
+		Additional =/= undefined -> encode_additonal(Additional);
+		true -> [0]
+		end,
+	io:format("~w~n", [ID]),
 	% Build IOList for DNS packet
-	IOList = [<<ID:16>>, Header#dns_header.qr, Header#dns_header.opcode, Header#dns_header.aa, Header#dns_header.tc, Header#dns_header.ra, <<Z:3>>, <<RCODE:4>>, <<QDCOUNT:16>>, <<ANCOUNT:16>>, <<NSCOUNT:16>>, <<ARCOUNT:16>>],
+	IOList = [ID, Header#dns_header.qr, Header#dns_header.opcode, Header#dns_header.aa, Header#dns_header.tc, Header#dns_header.ra, <<Z:3>>, <<RCODE:4>>, <<QDCOUNT:16>>, <<ANCOUNT:16>>, <<NSCOUNT:16>>, <<ARCOUNT:16>>],
 	{ok, IOList ++ QIOList ++ AIOList ++ AddIOList}.
 
 encode_answer(Answer) ->

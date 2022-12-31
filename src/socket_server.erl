@@ -24,9 +24,9 @@ code_change(_, State, _) ->
 
 handle_cast(listen, {UDPSocket, Handlers}) ->
 	case gen_udp:recv(UDPSocket, 0, 1) of
-	{ok, {_, _, Packet}} ->
+	{ok, {Address, Port, Packet}} ->
 		Handler = lists:nth(rand:uniform(length(Handlers)), Handlers),
-		gen_event:notify(Handler, {dns_request, Packet}),
+		gen_event:notify(Handler, {dns_request, Address, Port, Packet}),
 		io:format("Data: ~w~n", [Packet]);
 	{error, timeout} ->
 		ok
