@@ -1,3 +1,3 @@
 -record(dns_packet, {header, question, answer, authority, additional}).
 -record(dns_header, {id, qr, opcode, aa, tc, rd, ra, z, rcode, qdcount, ancount, nscount, arcount}).
--record(dns_record, {name, type, class}).
+-record(dns_record, {name, type, class, data}).

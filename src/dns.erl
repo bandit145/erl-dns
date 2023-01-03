@@ -1,5 +1,5 @@
 -module(dns).
--export([parse_packet/1, encode_packet/1, encode_question/1, encode_string/1, query/2]).
+-export([parse_packet/1, encode_packet/1, encode_question/1, encode_string/1, query/2, get_port/0, query_test/0, test_meme/0]).
 
 
 %define DNS packet related constants
@@ -17,23 +17,42 @@
 
 -include("dns.hrl").
 
+query_test() -> 
+	EName = encode_string("google.com"),
+	DNSPacket = #dns_packet{header=#dns_header{id=rand:bytes(2), qr=0, opcode=?QUERY, aa=0, tc=0, rd=1, ra=0, z=0, rcode=?NOERR, qdcount=1, ancount=0, nscount=0, arcount=0}, question=#dns_record{name=EName, type=1, class=1}},
+	{ok, Pack} = encode_packet(DNSPacket),
+	io:format("Packet info: ~w~n", [iolist_to_binary(Pack)]),
+	parse_packet(iolist_to_binary(Pack)).
+
+test_meme() ->
+	Q = #dns_record{name=dns:encode_string("google.com"), type=1, class=1},
+	encode_question([Q]).
+
 %high level functons
 query(Name, {Type, Server, Port, udp}) ->
 	EName = encode_string(Name),
-	DNSPacket = #dns_packet{header=#dns_header{id=rand:bytes(16), qr=0, opcode=?QUERY, tc=0, rd=1, ra=0, z=0, rcode=?NOERR, qdcount=1, ancount=0, nscount=0, arcount=0}, question=#dns_record{name=EName, type=Type, class=1}},
+	DNSPacket = #dns_packet{header=#dns_header{id=rand:bytes(2), qr=0, opcode=?QUERY, aa=0, tc=0, rd=1, ra=0, z=0, rcode=?NOERR, qdcount=1, ancount=0, nscount=0, arcount=0}, question=#dns_record{name=EName, type=Type, class=1}},
 	{ok, Packet} = encode_packet(DNSPacket),
-	{ok, Sock} = gen_udp:open(rand:uniform_s(1024, 65535)),
+	io:format("Packet info ~w~n", [Packet]),
+	{ok, Sock} = gen_udp:open(get_port(), [binary, {active, false}]),
 	ok = gen_udp:connect(Sock, Server, Port),
 	ok = gen_udp:send(Sock, Packet),
-	{ok, {_, _, RPacket}} = gen_udp:recv(Sock),
+	{ok, {_, _, RPacket}} = gen_udp:recv(Sock, 0, 200),
+	ok = gen_udp:close(Sock),
 	parse_packet(RPacket).
+
+get_port() ->
+	case rand:uniform(65535) of 
+		Num when Num < 1024 -> Num + 1024;
+		Num when Num >= 1024 -> Num
+	end.
 
 
 encode_string(Str) ->
 	F = fun(S, Accum) ->
 			Len = length(S),
-			LData = [Len] ++ [<<X>> || X <- S],
-			LData ++ Accum
+			LData = [Len] ++ [X || X <- S],
+			[LData | Accum]
 		end,
 	QList = string:split(Str, "."),
 	lists:foldr(F, [], QList).
@@ -47,23 +66,31 @@ encode_packet(#dns_packet{header=Header, question=Question, answer=Answer, autho
 	ANCOUNT = Header#dns_header.ancount,
 	NSCOUNT = Header#dns_header.nscount,
 	ARCOUNT = Header#dns_header.arcount,
+	QR = Header#dns_header.qr,
+	OPCODE = Header#dns_header.opcode,
+	AA = Header#dns_header.aa,
+	TC = Header#dns_header.tc,
+	RD = Header#dns_header.rd,
+	RA = Header#dns_header.ra,
 	%encode question
 	% we are at 96 bits here (for label pointer)
-	QIOList = encode_question([Question]),
+	QBinary = encode_question([Question]),
 	%encode answer
-	AIOList = if 
+	AnswerBin = if 
 		Answer =/= undefined -> encode_answer(Answer);
-		true -> [0]
+		true -> <<0>>
 		end,
 	%encode Additonal data
-	AddIOList = if
+	AdditionalBin = if
 		Additional =/= undefined -> encode_additonal(Additional);
-		true -> [0]
+		true -> <<0>>
 		end,
-	io:format("~w~n", [ID]),
+	% io:format("byte size ~w~n", [binary:referenced_byte_size(<<Z:3>>)]),
 	% Build IOList for DNS packet
-	IOList = [ID, Header#dns_header.qr, Header#dns_header.opcode, Header#dns_header.aa, Header#dns_header.tc, Header#dns_header.ra, <<Z:3>>, <<RCODE:4>>, <<QDCOUNT:16>>, <<ANCOUNT:16>>, <<NSCOUNT:16>>, <<ARCOUNT:16>>],
-	{ok, IOList ++ QIOList ++ AIOList ++ AddIOList}.
+	BinHeader = <<ID/binary, QR:1, OPCODE:4/big, AA:1, TC:1, RD:1, RA:1, Z:3/big, RCODE:4/big, QDCOUNT:16/big, ANCOUNT:16/big, NSCOUNT:16/big, ARCOUNT:16/big>>,
+	io:format("Binary header ~w~n",[BinHeader]),
+	io:format("Binary question ~w~n",[QBinary]),
+	{ok, <<BinHeader/binary, QBinary/binary, AnswerBin/binary, AdditionalBin/binary>>}.
 
 encode_answer(Answer) ->
 	ok.
@@ -75,21 +102,44 @@ encode_question(Question) ->
 	encode_question(Question, []).
 encode_question([], IOList) ->
 	R = lists:reverse(IOList),
-		lists:flatten(R);
+		list_to_binary(lists:flatten(R));
 encode_question([Record| T], IOList) ->
 	Type = Record#dns_record.type,
 	Class = Record#dns_record.class,
 	Packed = Record#dns_record.name ++ [<<00:8>>, <<Type:16>> , <<Class:16>>],
 	encode_question(T, [Packed | IOList]).
 
+%TODO: parse full packet
 parse_packet(<<ID:16, QR:1, OPCODE:4, AA:1, TC:1, RD:1, RA:1, Z:3, RCODE:4, QDCOUNT:16, ANCOUNT:16, NSCOUNT:16, ARCOUNT:16, Data/binary>>) ->
 	io:format("ID: ~w QR: ~w Questions: ~w ~n", [ID, QR, QDCOUNT]),
+	io:format("Data: ~w~n", [Data]),
+	%96 bits
 	Records = parse_records(QDCOUNT, Data),
-	{ok, #dns_packet{header=#dns_header{id=ID, qr=QR, opcode=OPCODE, aa=AA, tc=TC, rd=RD,ra=RA, z=Z, rcode=RCODE, qdcount=QDCOUNT,ancount=ANCOUNT, nscount=NSCOUNT, arcount=ARCOUNT}, question=Records, authority={}, additional={}}}.
+	case QR of
+		0 ->
+			Additional = undefined,
+			Answer = undefined,
+			Authority = undefined;
+		1 ->
+			%need to extract data from from the packet after the question data
+			Answer = parse_records(Data)
+	end,
+	{ok, #dns_packet{header=#dns_header{id=ID, qr=QR, opcode=OPCODE, aa=AA, tc=TC, rd=RD,ra=RA, z=Z, rcode=RCODE, qdcount=QDCOUNT,ancount=ANCOUNT, nscount=NSCOUNT, arcount=ARCOUNT}, question=Records, authority=Authority, additional=Additional, answer=Answer}}.
 
 
 parse_records(Num, Packet) ->
-	parse_records(Num, Packet, []).
+	Records = parse_records(Num, Packet, []),
+	QRecord = lists:nth(1),
+	F = fun(Record, Accum) ->
+			[Pointer, _] = Record#dns_record.name,
+			NewRec = if
+				Record#dns_record.name =:= <<11:8>> -> Record#dns_record{name=QRecord#dns_record.name};
+				true -> Record
+				end
+			NewRec;
+		end,
+	lists:foldl(F, Accum).
+
 parse_records(1, Packet, Records) ->
 	{ok, DNSRecord, NewData} = parse_record(Packet, []),
 	[DNSRecord | Records];
