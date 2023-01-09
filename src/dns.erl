@@ -1,20 +1,5 @@
 -module(dns).
 -export([parse_packet/1, encode_packet/1, encode_question/1, encode_string/1, query/2, get_port/0, query_test/0, test_meme/0]).
-
-
-%define DNS packet related constants
-%OPCODES 3-15 are reserved for feature use
--define(QUERY, 0).
--define(IQUERY, 1).
--define(STATUS, 2).
-%Response Codes
--define(NOERR, 0).
--define(FORMATERR, 1).
--define(SERVFAIL, 2).
--define(NAMEERR, 3).
--define(NOTIMPL, 4).
--define(REFUSED, 5).
-
 -include("dns.hrl").
 
 query_test() -> 
@@ -114,43 +99,55 @@ parse_packet(<<ID:16, QR:1, OPCODE:4, AA:1, TC:1, RD:1, RA:1, Z:3, RCODE:4, QDCO
 	io:format("ID: ~w QR: ~w Questions: ~w ~n", [ID, QR, QDCOUNT]),
 	io:format("Data: ~w~n", [Data]),
 	%96 bits
-	Records = parse_records(QDCOUNT, Data),
+	{[Question | Answer], DataPostQ} = parse_records(QDCOUNT+ANCOUNT, Data),
 	case QR of
 		0 ->
 			Additional = undefined,
-			Answer = undefined,
 			Authority = undefined;
 		1 ->
 			%need to extract data from from the packet after the question data
-			Answer = parse_records(Data)
+			Additional = undefined,
+			Authority = undefined
 	end,
-	{ok, #dns_packet{header=#dns_header{id=ID, qr=QR, opcode=OPCODE, aa=AA, tc=TC, rd=RD,ra=RA, z=Z, rcode=RCODE, qdcount=QDCOUNT,ancount=ANCOUNT, nscount=NSCOUNT, arcount=ARCOUNT}, question=Records, authority=Authority, additional=Additional, answer=Answer}}.
+	{ok, #dns_packet{header=#dns_header{id=ID, qr=QR, opcode=OPCODE, aa=AA, tc=TC, rd=RD,ra=RA, z=Z, rcode=RCODE, qdcount=QDCOUNT,ancount=ANCOUNT, nscount=NSCOUNT, arcount=ARCOUNT}, question=Question, authority=Authority, additional=Additional, answer=Answer}}.
 
 
 parse_records(Num, Packet) ->
-	Records = parse_records(Num, Packet, []),
-	QRecord = lists:nth(1),
+	io:format("Number of records ~w~n", [Num]),
+	{Records, NewData} = parse_records(Num, Packet, []),
+	QRecord = lists:last(Records),
+	io:format("Question ~w~n",[Records]),
 	F = fun(Record, Accum) ->
-			[Pointer, _] = Record#dns_record.name,
-			NewRec = if
-				Record#dns_record.name =:= <<11:8>> -> Record#dns_record{name=QRecord#dns_record.name};
-				true -> Record
-				end
-			NewRec;
+			% [Pointer, _] = Record#dns_record.name,
+			[Record#dns_record{name=QRecord#dns_record.name} | Accum]
 		end,
-	lists:foldl(F, Accum).
+	{lists:foldl(F, [], Records), NewData}.
 
 parse_records(1, Packet, Records) ->
 	{ok, DNSRecord, NewData} = parse_record(Packet, []),
-	[DNSRecord | Records];
+	{[DNSRecord | Records], NewData};
 parse_records(Num, Packet, Records) ->
 	{ok, DNSRecord, NewData} = parse_record(Packet, []),
 	parse_records(Num -1, NewData, [DNSRecord | Records ]).
 
-
+% I will have to return to this because I do not think this will work for message compression support
+%  when we are dealing with zone transfers but I'm not sure rn
+% What I would do in that case is carry refrences of labels in a dictionary/map through the recursive function
+parse_record(<<192:8, _:8, Type:16, Class:16, TTL:32, DataLength:16, Data/binary>>, Accum) ->
+	io:format("wedawdad~n"),
+	{RData, MoreData} = parse_octets(DataLength, Data),
+	{ok, #dns_record{type=Type, class=Class, data=RData, ttl=TTL}, MoreData};
 parse_record(<<00:8,Type:16, Class:16, Data/binary>>, Accum) ->
 	Name = lists:reverse(Accum),
+	io:format("Binary ~w~n",[Data]),
 	{ok, #dns_record{name=Name, type=Type, class=Class}, Data};
 parse_record(<<Char:8, Data/binary>>, Accum) ->
 	io:format("~w~n",[Accum]),
 	parse_record(Data, [Char | Accum]).
+
+parse_octets(Num, Data) ->
+	parse_octets(Num, Data, []).
+parse_octets(0, Data, Accum) ->
+	{lists:reverse(Accum), Data};
+parse_octets(Num, <<Octet:8, Data/binary>>, Accum) ->
+	parse_octets(Num -1, Data, [Octet | Accum]).
