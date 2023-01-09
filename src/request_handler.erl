@@ -1,13 +1,10 @@
 -module(request_handler).
 -include("dns.hrl").
--behavior(gen_event).
+-behavior(gen_server).
 
--export([init/1, handle_event/2, terminate/2, start_link/0]).
+-export([init/1, handle_cast/2, terminate/2, start_link/0]).
 
-start_link() ->
-	{ok, Pid} = gen_event:start_link(),
-	ok = gen_event:add_handler(Pid, ?MODULE, []),
-	{ok, Pid}.
+start_link() -> gen_server:start_link(?MODULE, [], []).
 
 init(_) ->
 	DNSPid = whereis(dns_ingest),
@@ -19,10 +16,12 @@ terminate(_, _) ->
 	gen_server:cast(DNSPid, {remove_handler, self()}),
 	ok.
 
-handle_event({dns_request, Address, Port, Packet}, State) ->
+handle_cast({dns_request, Address, Port, Packet}, State) ->
 	{ok, ParsedPacket} = dns:parse_packet(Packet),
 	io:format("Packet info: ~w~n", [ParsedPacket]),
-	{ok, State}.
+	{noreply, State}.
+
+handle_call(_, _, State) -> {noreply, State}.
 
 % private API stuff
 

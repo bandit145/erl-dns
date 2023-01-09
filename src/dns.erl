@@ -77,8 +77,14 @@ encode_packet(#dns_packet{header=Header, question=Question, answer=Answer, autho
 	io:format("Binary question ~w~n",[QBinary]),
 	{ok, <<BinHeader/binary, QBinary/binary, AnswerBin/binary, AdditionalBin/binary>>}.
 
-encode_answer(Answer) ->
-	ok.
+encode_answer(Records) ->
+	encode_answer(Records, []).
+encode_answer([], IOList) ->
+	iolist_to_binary(IOList);
+encode_answer([Record | T], IOList) ->
+	Type = Record#dns_record.type,
+	Class = Record#dns_record.class,
+	encode_answer(T, [<<192:8>>, <<96:8>>, <<Type:16>>, <<Class:16>> | IOList]).
 
 encode_additonal(Additional) ->
 	ok.
