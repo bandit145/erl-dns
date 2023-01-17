@@ -1,5 +1,5 @@
 -module(dns).
--export([parse_packet/1, encode_packet/1, encode_question/1, encode_string/1, query/2, get_port/0, query_test/0, test_meme/0]).
+-export([parse_packet/1, encode_packet/1, encode_question/1, encode_string/1, query/2, get_port/0, query_test/0, test_meme/0, string_to_dns_label/1, parse_zone_file/1]).
 -include("dns.hrl").
 
 query_test() -> 
@@ -12,6 +12,16 @@ query_test() ->
 test_meme() ->
 	Q = #dns_record{name=dns:encode_string("google.com"), type=1, class=1},
 	encode_question([Q]).
+
+string_to_dns_label(String) -> 
+	string_to_dns_label(string:split(String, "."), []).
+string_to_dns_label([], Accum) -> lists:flatten(lists:reverse(Accum));
+string_to_dns_label([H | T], Accum) ->
+	F = fun(Char, BinCon) -> [<<Char>> | BinCon] end,
+	L = length(H),
+	Bin = [<<L>> | lists:foldr(F, [], H)],
+	string_to_dns_label(T, [Bin | Accum]).
+
 
 %high level functons
 query(Name, {Type, Server, Port, udp}) ->
@@ -26,6 +36,7 @@ query(Name, {Type, Server, Port, udp}) ->
 	ok = gen_udp:close(Sock),
 	parse_packet(RPacket).
 
+%This needs to be fixed instead of random + number offset
 get_port() ->
 	case rand:uniform(65535) of 
 		Num when Num < 1024 -> Num + 1024;
@@ -147,7 +158,7 @@ parse_record(<<00:8,Type:16, Class:16, Data/binary>>, Accum) ->
 	Name = lists:reverse(Accum),
 	io:format("Binary ~w~n",[Data]),
 	{ok, #dns_record{name=Name, type=Type, class=Class}, Data};
-parse_record(<<Char:8, Data/binary>>, Accum) ->
+parse_record(<<Char:8/bitstring, Data/binary>>, Accum) ->
 	io:format("~w~n",[Accum]),
 	parse_record(Data, [Char | Accum]).
 
@@ -157,3 +168,51 @@ parse_octets(0, Data, Accum) ->
 	{lists:reverse(Accum), Data};
 parse_octets(Num, <<Octet:8, Data/binary>>, Accum) ->
 	parse_octets(Num -1, Data, [Octet | Accum]).
+
+% zone file parsing
+parse_zone_file(ZoneFile) ->
+	{ok, Data} = file:read_file(ZoneFile),
+	parse_zone_file(Data, [], #{}).
+parse_zone_file([], Records, Meta) ->
+	Records;
+parse_zone_file(Data, Records, Meta) ->
+	case parse_line(Data, Meta) of
+		{meta, Key, Value, NewData}  -> parse_zone_file(NewData, Records, maps:put(Key, Value, Meta));
+		{record, Record} -> parse_zone_file(Data, [Record | Records], Meta)
+	end.
+
+
+
+parse_line(Data, Meta) ->
+	parse_line(Data, [], Meta).
+parse_line(<<10:8, Data/binary>>, Accum, Meta) ->
+	{lists:reverse(Accum), Data};
+parse_line(<<59:8, Data/binary>>, Accum, Meta) ->
+	parse_line_comment(Data, Accum);
+parse_line(<<9:8, Data/binary>>, Accum, Meta) ->
+	parse_line(Data, Accum);
+parse_line(<<32:8, Data/binary>>, Accum, Meta) ->
+	parse_line(Data, Accum);
+parse_line(<<36:8, Data/binary>>, Accum, Meta) ->
+	io:format("weewowow~n"),
+	parse_line(Data, {[], []}, 0, meta);
+parse_line(<<Char:8, Data/binary>>, Accum, Meta) ->
+	parse_line(Data, [Char | Accum]).
+%wtf am I doing
+parse_line(<<10:8, Data/binary>>, {Key, Value}, 1, meta) ->
+	{meta, list_to_binary(lists:reverse(Key)), list_to_binary(lists:reverse(Value)), Data};
+parse_line(<<9:8, Data/binary>>, Accum, 0, meta) ->
+	parse_line(Data, Accum, 1, meta);
+parse_line(<<32:8, Data/binary>>, Accum, 0, meta) ->
+	parse_line(Data, Accum, 1, meta);
+parse_line(<<Char:8, Data/binary>>, {Key, Value}, 0, meta) ->
+	io:format("In the 0s~n"),
+	parse_line(Data, {[Char | Key], Value}, 0, meta);
+parse_line(<<Char:8, Data/binary>>, {Key, Value}, 1, meta) ->
+	io:format("in the 1s~n"),
+	parse_line(Data, {Key, [Char | Value]}, 1, meta).
+
+parse_line_comment(<<10:8, Data/binary>>, Accum) ->
+	{lists:reverse(Accum), Data};
+parse_line_comment(<<_:8, Data/binary>>, Accum) ->
+	parse_line_comment(Data, Accum).

@@ -1,4 +1,5 @@
 -module(dns_server_sup).
+-include("eunit/")
 -behavior(supervisor).
 
 -export([init/1, start_link/1]).
