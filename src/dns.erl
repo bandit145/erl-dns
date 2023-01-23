@@ -170,15 +170,17 @@ parse_octets(Num, <<Octet:8, Data/binary>>, Accum) ->
 	parse_octets(Num -1, Data, [Octet | Accum]).
 
 % zone file parsing
+% https://en.wikipedia.org/wiki/ASCII
 parse_zone_file(ZoneFile) ->
 	{ok, Data} = file:read_file(ZoneFile),
-	parse_zone_file(Data, [], #{}).
-parse_zone_file([], Records, Meta) ->
-	Records;
-parse_zone_file(Data, Records, Meta) ->
+	parse_zone_file(Data, [], 1, #{}).
+parse_zone_file(Data, Records, LineNo, Meta) ->
+	io:format("Line: ~w~n",[LineNo]),
 	case parse_line(Data, Meta) of
-		{meta, Key, Value, NewData}  -> parse_zone_file(NewData, Records, maps:put(Key, Value, Meta));
-		{record, Record} -> parse_zone_file(Data, [Record | Records], Meta)
+		{record, Record, eof} -> [Record | Records];
+		{meta, Key, Value, NewData}  -> parse_zone_file(NewData, Records, LineNo+1, maps:put(Key, Value, Meta));
+		%put error on line parse here
+		{record, Record, NewData} -> parse_zone_file(NewData, [Record | Records], LineNo+1, Meta)
 	end.
 
 
@@ -186,18 +188,25 @@ parse_zone_file(Data, Records, Meta) ->
 parse_line(Data, Meta) ->
 	parse_line(Data, [], Meta).
 parse_line(<<10:8, Data/binary>>, Accum, Meta) ->
-	{lists:reverse(Accum), Data};
+	{record, lists:reverse(Accum), Data};
+parse_line(<<>>, Accum, Meta) ->
+	{record, lists:reverse(Accum), eof};
 parse_line(<<59:8, Data/binary>>, Accum, Meta) ->
 	parse_line_comment(Data, Accum);
 parse_line(<<9:8, Data/binary>>, Accum, Meta) ->
-	parse_line(Data, Accum);
+	parse_line(Data, Accum, Meta);
+parse_line(<<9:8, 9:8, Data/binary>>, Accum, Meta) ->
+	parse_line(Data, Accum, Meta);
+parse_line(<<32:8, 32:8, Data/binary>>, Accum, Meta) ->
+	parse_line(Data, Accum, Meta);
 parse_line(<<32:8, Data/binary>>, Accum, Meta) ->
-	parse_line(Data, Accum);
+	{Field, NewData} = parse_field(Data, []),
+	parse_line(NewData, [Field | Accum], Meta);
 parse_line(<<36:8, Data/binary>>, Accum, Meta) ->
-	io:format("weewowow~n"),
 	parse_line(Data, {[], []}, 0, meta);
-parse_line(<<Char:8, Data/binary>>, Accum, Meta) ->
-	parse_line(Data, [Char | Accum]).
+parse_line(Data, Accum, Meta) ->
+	{Field, NewData} = parse_field(Data, []),
+	parse_line(NewData, [Field | Accum], Meta).
 %wtf am I doing
 parse_line(<<10:8, Data/binary>>, {Key, Value}, 1, meta) ->
 	{meta, list_to_binary(lists:reverse(Key)), list_to_binary(lists:reverse(Value)), Data};
@@ -206,13 +215,24 @@ parse_line(<<9:8, Data/binary>>, Accum, 0, meta) ->
 parse_line(<<32:8, Data/binary>>, Accum, 0, meta) ->
 	parse_line(Data, Accum, 1, meta);
 parse_line(<<Char:8, Data/binary>>, {Key, Value}, 0, meta) ->
-	io:format("In the 0s~n"),
 	parse_line(Data, {[Char | Key], Value}, 0, meta);
 parse_line(<<Char:8, Data/binary>>, {Key, Value}, 1, meta) ->
-	io:format("in the 1s~n"),
 	parse_line(Data, {Key, [Char | Value]}, 1, meta).
 
 parse_line_comment(<<10:8, Data/binary>>, Accum) ->
 	{lists:reverse(Accum), Data};
 parse_line_comment(<<_:8, Data/binary>>, Accum) ->
 	parse_line_comment(Data, Accum).
+
+parse_field(<<>>, Accum) ->
+	{lists:reverse(Accum), <<>>};
+parse_field(<<32:8, Data/binary>>, Accum) ->
+	{lists:reverse(Accum), <<32:8, Data/binary>>};
+parse_field(<<9:8, Data/binary>>, Accum) ->
+	{lists:reverse(Accum), <<9:8, Data/binary>>};
+parse_field(<<40:8, Data/binary>>, Accum) ->
+	parse_field(Data, Accum);
+parse_field(<<41:8, Data/binary>>, Accum) ->
+	parse_field(Data, Accum);
+parse_field(<<Char:8, Data/binary>>, Accum) ->
+	parse_field(Data, [Char | Accum]).
