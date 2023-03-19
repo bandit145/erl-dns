@@ -1,3 +1,4 @@
+**.vagrant/
 .eunit
 *.o
 *.beam
