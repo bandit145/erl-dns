@@ -1,4 +1,4 @@
--module(db).
+-module(dns_db).
 -include("dns.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 -export([store_record/1, get_record/1]).

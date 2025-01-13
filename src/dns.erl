@@ -1,17 +1,6 @@
 -module(dns).
--export([parse_packet/1, encode_packet/1, encode_question/1, encode_string/1, query/2, get_port/0, query_test/0, test_meme/0, string_to_dns_label/1, parse_zone_file/1]).
+-export([parse_packet/1, encode_packet/1, encode_question/1, encode_string/1, query/2, get_port/0, string_to_dns_label/1, parse_zone_file/1]).
 -include("dns.hrl").
-
-query_test() -> 
-	EName = encode_string("google.com"),
-	DNSPacket = #dns_packet{header=#dns_header{id=rand:bytes(2), qr=0, opcode=?QUERY, aa=0, tc=0, rd=1, ra=0, z=0, rcode=?NOERR, qdcount=1, ancount=0, nscount=0, arcount=0}, question=#dns_record{name=EName, type=1, class=1}},
-	{ok, Pack} = encode_packet(DNSPacket),
-	io:format("Packet info: ~w~n", [iolist_to_binary(Pack)]),
-	parse_packet(iolist_to_binary(Pack)).
-
-test_meme() ->
-	Q = #dns_record{name=dns:encode_string("google.com"), type=1, class=1},
-	encode_question([Q]).
 
 string_to_dns_label(String) -> 
 	string_to_dns_label(string:split(String, "."), []).
@@ -50,7 +39,7 @@ encode_string(Str) ->
 			LData = [Len] ++ [X || X <- S],
 			[LData | Accum]
 		end,
-	QList = string:split(Str, "."),
+	QList = string:split(Str, ".", all),
 	lists:foldr(F, [], QList).
 
 %returns IO list for feeding into gen_tcp/gen_udp:send
@@ -74,12 +63,12 @@ encode_packet(#dns_packet{header=Header, question=Question, answer=Answer, autho
 	%encode answer
 	AnswerBin = if 
 		Answer =/= undefined -> encode_answer(Answer);
-		true -> <<0>>
+		true -> <<>>
 		end,
 	%encode Additonal data
 	AdditionalBin = if
 		Additional =/= undefined -> encode_additonal(Additional);
-		true -> <<0>>
+		true -> <<>>
 		end,
 	% io:format("byte size ~w~n", [binary:referenced_byte_size(<<Z:3>>)]),
 	% Build IOList for DNS packet
@@ -117,6 +106,7 @@ parse_packet(<<ID:16, QR:1, OPCODE:4, AA:1, TC:1, RD:1, RA:1, Z:3, RCODE:4, QDCO
 	io:format("Data: ~w~n", [Data]),
 	%96 bits
 	{[Question | Answer], DataPostQ} = parse_records(QDCOUNT+ANCOUNT, Data),
+	io:format("WTF am I doing ~p", [Answer]),
 	case QR of
 		0 ->
 			Additional = undefined,
@@ -133,19 +123,18 @@ parse_records(Num, Packet) ->
 	io:format("Number of records ~w~n", [Num]),
 	{Records, NewData} = parse_records(Num, Packet, []),
 	QRecord = lists:last(Records),
-	io:format("Question ~w~n",[Records]),
 	F = fun(Record, Accum) ->
 			% [Pointer, _] = Record#dns_record.name,
-			[Record#dns_record{name=QRecord#dns_record.name} | Accum]
+			[Record#dns_record{name=QRecord#dns_record.name}] ++ Accum
 		end,
 	{lists:foldl(F, [], Records), NewData}.
 
 parse_records(1, Packet, Records) ->
 	{ok, DNSRecord, NewData} = parse_record(Packet, []),
-	{[DNSRecord | Records], NewData};
+	{[DNSRecord] ++ Records, NewData};
 parse_records(Num, Packet, Records) ->
 	{ok, DNSRecord, NewData} = parse_record(Packet, []),
-	parse_records(Num -1, NewData, [DNSRecord | Records ]).
+	parse_records(Num -1, NewData, [DNSRecord] ++ Records).
 
 % I will have to return to this because I do not think this will work for message compression support
 %  when we are dealing with zone transfers but I'm not sure rn

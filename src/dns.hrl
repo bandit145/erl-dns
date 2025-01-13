@@ -7,6 +7,7 @@
 -define(QUERY, 0).
 -define(IQUERY, 1).
 -define(STATUS, 2).
+-define(UPDATE, 5).
 %Response Codes
 -define(NOERR, 0).
 -define(FORMATERR, 1).
@@ -14,7 +15,11 @@
 -define(NAMEERR, 3).
 -define(NOTIMPL, 4).
 -define(REFUSED, 5).
-
+-define(YXDOMAIN,6).
+-define(YXRRSET, 7).
+-define(NXRRSET, 8).
+-define(NOTAUTH, 9).
+-define(NOTZONE, 10).
 
 % Record types
 -define(A, 1).

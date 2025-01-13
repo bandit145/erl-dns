@@ -1,0 +1,9 @@
+services:
+  bind:
+    image: docker.io/ubuntu/bind9:latest
+    volumes:
+      - ./test/bind_config/zone:/var/lib/bind/default.zone
+      - ./test/bind_config/named.conf:/etc/bind/named.conf
+    ports:
+      - 8053:53
+      - 8053:53/udp

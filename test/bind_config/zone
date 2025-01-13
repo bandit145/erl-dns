@@ -1,0 +1,10 @@
+$ORIGIN default.com.
+$TTL 3600
+@ IN SOA ns1.default.com. noc.default.com. (1 7200 3600 1209600 3600)
+
+@ IN NS ns1
+ns1 IN A 192.1.1.1
+test1 IN A 192.1.1.2
+cname-test1 IN CNAME test1
+
+_svc_a._http IN SRV 1 1 80 test1
