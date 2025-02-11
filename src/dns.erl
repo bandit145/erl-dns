@@ -11,6 +11,16 @@ string_to_dns_label([H | T], Accum) ->
 	Bin = [<<L>> | lists:foldr(F, [], H)],
 	string_to_dns_label(T, [Bin | Accum]).
 
+dns_label_to_bin([], Cnt, Accum) ->
+	binary_to_list(Accum);
+dns_label_to_bin([<<3>> | Tail], 0, Accum) ->
+	dns_label_to_bin(Tail, 1, Accum);
+dns_label_to_bin([<<3>> | Tail], Cnt, Accum) ->
+	dns_label_to_bin(Tail, Cnt + 1, <<Accum/binary, ".">>);
+dns_label_to_bin([<<7>> | Tail], Cnt, Accum) ->
+	dns_label_to_bin(Tail, Cnt + 1, <<Accum/binary, ".">>);
+dns_label_to_bin([Char | Tail], Cnt, Accum) ->
+	dns_label_to_bin(Tail, Cnt+1, <<Accum/binary, Char/binary>>).
 
 %high level functons
 query(Name, {Type, Server, Port, udp}) ->
@@ -106,7 +116,6 @@ parse_packet(<<ID:16, QR:1, OPCODE:4, AA:1, TC:1, RD:1, RA:1, Z:3, RCODE:4, QDCO
 	io:format("Data: ~w~n", [Data]),
 	%96 bits
 	{[Question | Answer], DataPostQ} = parse_records(QDCOUNT+ANCOUNT, Data),
-	io:format("WTF am I doing ~p", [Answer]),
 	case QR of
 		0 ->
 			Additional = undefined,
@@ -124,8 +133,7 @@ parse_records(Num, Packet) ->
 	{Records, NewData} = parse_records(Num, Packet, []),
 	QRecord = lists:last(Records),
 	F = fun(Record, Accum) ->
-			% [Pointer, _] = Record#dns_record.name,
-			[Record#dns_record{name=QRecord#dns_record.name}] ++ Accum
+			[Record#dns_record{name=dns_label_to_bin(QRecord#dns_record.name,0, <<>>)}] ++ Accum
 		end,
 	{lists:foldl(F, [], Records), NewData}.
 
@@ -140,7 +148,6 @@ parse_records(Num, Packet, Records) ->
 %  when we are dealing with zone transfers but I'm not sure rn
 % What I would do in that case is carry refrences of labels in a dictionary/map through the recursive function
 parse_record(<<192:8, _:8, Type:16, Class:16, TTL:32, DataLength:16, Data/binary>>, Accum) ->
-	io:format("wedawdad~n"),
 	{RData, MoreData} = parse_octets(DataLength, Data),
 	{ok, #dns_record{type=Type, class=Class, data=RData, ttl=TTL}, MoreData};
 parse_record(<<00:8,Type:16, Class:16, Data/binary>>, Accum) ->

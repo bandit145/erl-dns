@@ -1,7 +1,12 @@
 -record(dns_packet, {header, question, answer, authority, additional}).
 -record(dns_header, {id, qr, opcode, aa, tc, rd, ra, z, rcode, qdcount, ancount, nscount, arcount}).
+-record(dns_update_header,{id, qr, opcode, z, rcode, zocount, prcount,upcount,adcount}).
 -record(dns_record, {name, type, class, data, ttl}).
 
+%DNS Classes
+-define(IN, 1).
+-define(CH, 3).
+-define(HS, 4).
 %define DNS packet related constants
 %OPCODES 3-15 are reserved for feature use
 -define(QUERY, 0).
